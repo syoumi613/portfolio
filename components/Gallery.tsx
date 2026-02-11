@@ -69,7 +69,7 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
                 initial="hidden"
                 whileInView="show"
                 viewport={{ once: true, margin: "-10%" }}
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full p-4 grid-flow-dense"
+                className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full p-4 grid-flow-dense"
             >
                 <AnimatePresence mode="popLayout">
                     {loading ? (
