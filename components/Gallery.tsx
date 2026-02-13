@@ -1,28 +1,37 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 
-interface Photo {
+export interface GalleryPhoto {
     id: string;
     url: string;
     fileName?: string;
     category?: string;
-    width?: number;
-    height?: number;
-    isMain?: boolean; // Optional flag for "Main" photo
+    width?: number; // Optional: If missing, defaults to landscape/square style
+    height?: number; // Optional
+    [key: string]: any; // Allow other properties (like storagePath for admin)
 }
 
 interface GalleryProps {
-    photos: Photo[];
+    photos: GalleryPhoto[];
     loading: boolean;
-    categories: { id: string; label: string }[];
+    categories?: { id: string; label: string }[]; // Made optional
+    onDelete?: (photo: GalleryPhoto) => void; // Admin Action
+    renderOverlay?: (photo: GalleryPhoto) => React.ReactNode; // Client Portal Action
+    emptyMessage?: string;
 }
 
-export default function Gallery({ photos, loading, categories }: GalleryProps) {
-    const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+export default function Gallery({
+    photos,
+    loading,
+    categories,
+    onDelete,
+    renderOverlay,
+    emptyMessage = "No photos found."
+}: GalleryProps) {
+    const [selectedPhoto, setSelectedPhoto] = useState<GalleryPhoto | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     // Reset loading state when opening a new photo
@@ -32,7 +41,7 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
 
     // Premium Animation Settings (Fast & Snappy)
     const fastEase = [0.16, 1, 0.3, 1] as const;
-    const fastTransition = { duration: 0.4, ease: fastEase }; // sped up from 1.8s to 0.4s
+    const fastTransition = { duration: 0.4, ease: fastEase };
 
     const photoVariant = {
         hidden: { opacity: 0, scale: 0.95, y: 20 },
@@ -49,18 +58,15 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
         show: {
             opacity: 1,
             transition: {
-                staggerChildren: 0.05, // faster stagger
+                staggerChildren: 0.05,
                 delayChildren: 0.1
             }
         }
     };
 
-    const handlePhotoClick = (photo: Photo) => {
+    const handlePhotoClick = (photo: GalleryPhoto) => {
         setSelectedPhoto(photo);
-        // Loading state is reset by useEffect
     };
-
-
 
     return (
         <>
@@ -79,9 +85,7 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
                     ) : (
                         <>
                             {photos.map((photo, index) => {
-                                // Match Admin logic: width < height is Portrait.
-                                // If dimensions are missing, default to Landscape (same as Admin which requires all 3 conditions).
-                                // Admin: const isVertical = photo.width && photo.height && photo.width < photo.height;
+                                // Logic: width < height is Portrait.
                                 const isPortrait = photo.width && photo.height && photo.width < photo.height;
 
                                 return (
@@ -108,6 +112,35 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
                                             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                                         />
 
+                                        {/* Hover Overlay for Actions (Delete / Download) */}
+                                        {(onDelete || renderOverlay) && (
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all opacity-0 group-hover:opacity-100 flex flex-col justify-between p-3 pointer-events-none">
+                                                <div className="flex justify-end pointer-events-auto">
+                                                    {onDelete && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onDelete(photo);
+                                                            }}
+                                                            className="p-2 bg-white text-red-600 rounded-full shadow-md hover:bg-red-50 transition-colors"
+                                                            title="Delete"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex justify-end pointer-events-auto">
+                                                    {renderOverlay && renderOverlay(photo)}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Filename Overlay (Bottom) - Optional, maybe only for Admin? 
+                                            Currently keeping it consistent with public design (clean) unless specifically requested. 
+                                            Public design has NO text overlay usually. 
+                                            Let's add a subtle gradient if needed, but for now kept clean.
+                                        */}
 
                                     </motion.div>
                                 );
@@ -119,7 +152,7 @@ export default function Gallery({ photos, loading, categories }: GalleryProps) {
                                     animate={{ opacity: 1 }}
                                     className="col-span-full h-64 flex items-center justify-center text-gray-400"
                                 >
-                                    No photos in this category.
+                                    {emptyMessage}
                                 </motion.div>
                             )}
                         </>

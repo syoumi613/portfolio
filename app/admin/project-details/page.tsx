@@ -7,6 +7,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { Upload, X, Check, Image as ImageIcon, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import Gallery from '@/components/Gallery';
 
 function ProjectDetailsContent() {
     const searchParams = useSearchParams();
@@ -281,6 +282,7 @@ function ProjectDetailsContent() {
                         </div>
                     </div>
 
+
                     {/* Right Column: Gallery */}
                     <div className="lg:col-span-2">
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[500px]">
@@ -291,37 +293,12 @@ function ProjectDetailsContent() {
                                 </h2>
                             </div>
 
-                            {photos.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-64 text-gray-400 border border-dashed border-gray-200 rounded-lg">
-                                    <ImageIcon className="h-10 w-10 mb-2 opacity-50" />
-                                    <p>写真はまだありません</p>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                                    {photos.map((photo) => (
-                                        <div key={photo.id} className="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
-                                            <img
-                                                src={photo.url}
-                                                alt={photo.fileName}
-                                                className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                                                loading="lazy"
-                                            />
-                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all opacity-0 group-hover:opacity-100 flex items-start justify-end p-2">
-                                                <button
-                                                    onClick={() => handleDeletePhoto(photo.id, photo.storagePath)}
-                                                    className="p-1.5 bg-white text-red-600 rounded-full shadow-sm hover:bg-red-50"
-                                                    title="削除"
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </button>
-                                            </div>
-                                            <div className="absolute bottom-0 inset-x-0 p-2 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <p className="text-white text-[10px] truncate">{photo.fileName}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                            <Gallery
+                                photos={photos}
+                                loading={loading}
+                                onDelete={(photo) => handleDeletePhoto(photo.id, photo.storagePath)}
+                                emptyMessage="写真はまだありません"
+                            />
                         </div>
                     </div>
                 </div>

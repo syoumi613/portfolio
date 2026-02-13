@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
+import HeroSlider from '@/components/HeroSlider';
 
 
 
@@ -151,21 +152,17 @@ export default function Home() {
           initial="hidden"
           whileInView="show"
           viewport={{ once: true, margin: "-10%" }}
-          className="w-full px-4 pb-8"
+          className="w-full px-6 pb-8"
         >
-          <div className="mt-48 md:mt-56 w-full max-w-4xl mx-auto text-center space-y-8">
-            <motion.h1 variants={fadeInUpVariant} className="text-4xl md:text-6xl font-bold tracking-tight text-gray-900">
-              その瞬間を、<br />永遠の思い出に。
-            </motion.h1>
-            <motion.p variants={fadeInUpVariant} className="text-lg md:text-xl text-gray-600 leading-relaxed max-w-2xl mx-auto">
-              イベント、ポートレート、商用撮影など。<br />
-              プロフェッショナルな撮影サービスを提供します。
-            </motion.p>
+          <div className="mt-28 md:mt-36 w-full px-4">
+            <div className="w-full h-[300px] md:h-[500px]">
+              <HeroSlider />
+            </div>
 
-            {/* Category Tabs (Integrated into Hero) */}
+            {/* Category Tabs */}
             <motion.div
               variants={fadeInUpVariant}
-              className="mt-56 flex justify-center"
+              className="mt-12 flex justify-center"
             >
               <div className="inline-flex bg-gray-100 p-1.5 rounded-full relative">
                 {categories.map((cat) => (
@@ -198,11 +195,13 @@ export default function Home() {
         <section className="flex-1 px-6 pb-20 w-full">
 
 
+
           {/* Photo Grid */}
           <Gallery
             photos={filteredPhotos}
             loading={loading}
             categories={categories}
+            emptyMessage="このカテゴリーにはまだ写真がありません。"
           />
         </section>
       </div>

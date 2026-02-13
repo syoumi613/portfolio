@@ -62,6 +62,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const navItems = [
         { name: 'プロジェクト管理', href: '/admin/dashboard/', icon: LayoutDashboard },
         { name: 'ポートフォリオ管理', href: '/admin/portfolio/', icon: ImageIcon },
+        { name: 'スライドショー管理', href: '/admin/slides/', icon: ImageIcon },
         // { name: '設定', href: '/admin/settings', icon: Settings }, // Future
     ];
 

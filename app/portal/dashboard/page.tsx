@@ -6,6 +6,7 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
 import { LogOut, Download } from 'lucide-react';
+import Gallery from '@/components/Gallery';
 
 interface Photo {
     id: string;
@@ -107,39 +108,24 @@ export default function ClientDashboard() {
             </nav>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                {photos.length === 0 ? (
-                    <div className="text-center py-20 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                        <p className="text-gray-500 font-light">写真はまだありません。</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                        {photos.map((photo) => (
-                            <div key={photo.id} className="group relative aspect-[3/4] bg-gray-100 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all">
-                                {/* Image Placeholder - In real app use Next.js Image */}
-                                <img
-                                    src={photo.url}
-                                    alt={photo.fileName}
-                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                    loading="lazy"
-                                />
-
-                                {/* Overlay */}
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end justify-between p-4 opacity-0 group-hover:opacity-100">
-                                    <span className="text-white text-xs truncate max-w-[70%]">{photo.fileName}</span>
-                                    <a
-                                        href={photo.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-900 shadow-sm"
-                                        download={photo.fileName} // Note: download attr works best for same-origin
-                                    >
-                                        <Download className="h-4 w-4" />
-                                    </a>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <Gallery
+                    photos={photos}
+                    loading={loading}
+                    emptyMessage="写真はまだありません。"
+                    renderOverlay={(photo) => (
+                        <a
+                            href={photo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-900 shadow-sm transition-colors"
+                            download={photo.fileName}
+                            title="Download"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <Download className="h-4 w-4" />
+                        </a>
+                    )}
+                />
             </main>
         </div>
     );
