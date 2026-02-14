@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { X, ArrowRight, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,17 +17,39 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
     const [passcode, setPasscode] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [validProjects, setValidProjects] = useState<Set<string>>(new Set());
     const router = useRouter();
 
-    // Reset state when modal opens
-    // Using useEffect ensures we start fresh every time the modal is shown
+    // Pre-fetch valid project IDs on modal open for Zero Latency
     useEffect(() => {
         if (isOpen) {
             setPasscode('');
             setError('');
             setLoading(false);
+
+            const fetchValidProjects = async () => {
+                try {
+                    // Fetch all project IDs (lightweight)
+                    const projectsSnap = await getDocs(collection(db, 'projects'));
+                    const pIds = new Set<string>();
+                    projectsSnap.forEach(doc => pIds.add(doc.id));
+
+                    // Fallback for legacy clients
+                    const clientsSnap = await getDocs(collection(db, 'clients'));
+                    clientsSnap.forEach(doc => pIds.add(doc.id));
+
+                    setValidProjects(pIds);
+                } catch (err) {
+                    console.error("Failed to pre-fetch project IDs", err);
+                }
+            };
+
+            fetchValidProjects();
         }
     }, [isOpen]);
+
+    // Synchronous Derived State (Zero Latency)
+    const isCodeValid = passcode.length === 4 && validProjects.has(passcode);
 
     if (!isOpen) return null;
 
@@ -45,17 +67,16 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
             // 1. Auth Login
             await signInWithEmailAndPassword(auth, email, derivedPassword);
 
-            // 2. Verify Project Existence in Firestore (Ghost Login Prevention)
-            const docRef = doc(db, 'projects', passcode);
-            const docSnap = await getDoc(docRef);
-
-            if (!docSnap.exists()) {
-                // Check legacy collection just in case
-                const legacyRef = doc(db, 'clients', passcode);
-                const legacySnap = await getDoc(legacyRef);
-
-                if (!legacySnap.exists()) {
-                    throw new Error("Project deleted");
+            // 2. Verify Project Existence (Ghost Login Prevention)
+            // Use Client-side Cache for speed, or fallback to Auth success
+            if (!validProjects.has(passcode)) {
+                // If not in cache (extremely rare if pre-fetched correctly), re-verify
+                const docRef = doc(db, 'projects', passcode);
+                const docSnap = await getDoc(docRef);
+                if (!docSnap.exists()) {
+                    const legacyRef = doc(db, 'clients', passcode);
+                    const legacySnap = await getDoc(legacyRef);
+                    if (!legacySnap.exists()) throw new Error("Project deleted");
                 }
             }
 
@@ -133,14 +154,23 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
                             <div className="relative flex justify-center gap-3">
                                 {/* Invisible Input specifically for mobile keyboard handling */}
                                 <input
-                                    type="tel" // Changed to tel for reliable number pad on iOS/Android
-                                    pattern="[0-9]*" // Ensures number pad on iOS
-                                    inputMode="numeric"
+                                    type="text"
+                                    inputMode="text"
+                                    autoCapitalize="none"
                                     maxLength={4}
                                     value={passcode}
                                     onChange={(e) => {
-                                        const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
-                                        setPasscode(val);
+                                        let val = e.target.value;
+                                        // 1. Full-width to Half-width conversion
+                                        val = val.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => {
+                                            return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+                                        });
+                                        // 2. Remove non-alphanumeric characters
+                                        val = val.replace(/[^0-9a-zA-Z]/g, '');
+                                        // 3. Normalize to lowercase (Case-insensitive)
+                                        val = val.toLowerCase();
+
+                                        setPasscode(val.slice(0, 4));
                                     }}
                                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                                     autoFocus
@@ -204,13 +234,13 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
 
                             <button
                                 type="submit"
-                                disabled={loading || passcode.length !== 4}
+                                disabled={loading || !isCodeValid}
                                 className={`
                                     group w-full flex items-center justify-center py-4 rounded-full font-medium tracking-widest text-xs
-                                    transition-all duration-300 shadow-lg 
-                                    ${passcode.length === 4
-                                        ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl opacity-100 translate-y-0'
-                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'}
+                                    transition-all duration-200 shadow-lg 
+                                    ${isCodeValid
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-xl opacity-100 translate-y-0 cursor-pointer'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'}
                                 `}
                             >
                                 {loading ? (
@@ -218,7 +248,7 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
                                 ) : (
                                     <span className="flex items-center gap-2">
                                         アルバムを見る
-                                        <ArrowRight className={`h-3 w-3 transform transition-transform ${passcode.length === 4 ? 'group-hover:translate-x-1' : ''}`} />
+                                        <ArrowRight className={`h-3 w-3 transform transition-transform ${isCodeValid ? 'group-hover:translate-x-1' : ''}`} />
                                     </span>
                                 )}
                             </button>

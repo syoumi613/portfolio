@@ -4,20 +4,18 @@ import { useState } from 'react';
 import { db, storage } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Plus, Trash2, Image as ImageIcon, Video, FileText, Loader2, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Image as ImageIcon, Video, FileText, Loader2, Link, ArrowUp, ArrowDown, Lock } from 'lucide-react';
 
 export interface SlideshowSlide {
     id: string;
     type: 'MOVIE' | 'AFTER' | 'DESCRIPTION';
-    title: string; // Internal label for admin
-    content: string; // URL or Text. For AFTER, this might be unused or legacy.
-    storagePath?: string; // If image upload
-    // For Before/After
+    title: string;
+    content: string;
+    storagePath?: string;
     beforeUrl?: string;
     afterUrl?: string;
     beforeStoragePath?: string;
     afterStoragePath?: string;
-    // For Description
     imageUrl?: string;
 }
 
@@ -40,11 +38,51 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
     // New Slide Form State
     const [newType, setNewType] = useState<'MOVIE' | 'AFTER' | 'DESCRIPTION'>('MOVIE');
     const [newContent, setNewContent] = useState('');
+
+    // For MOVIE type
+    const [movieFile, setMovieFile] = useState<File | null>(null);
+
     // For AFTER type
     const [beforeFile, setBeforeFile] = useState<File | null>(null);
     const [afterFile, setAfterFile] = useState<File | null>(null);
     // For DESCRIPTION type
     const [descBgFile, setDescBgFile] = useState<File | null>(null);
+
+    // Reorder Function
+    const handleMoveSlide = async (index: number, direction: 'up' | 'down') => {
+        if (!slides || slides.length < 2) return;
+
+        const newSlides = [...slides];
+        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+        // Bounds check
+        if (targetIndex < 0 || targetIndex >= newSlides.length) return;
+
+        // "Video First" Restriction:
+        // 1. Cannot move a Movie slide (pinned to top)
+        if (newSlides[index].type === 'MOVIE') {
+            alert('動画スライドは先頭固定のため移動できません。');
+            return;
+        }
+        // 2. Cannot move a non-Movie slide above a Movie slide
+        if (newSlides[targetIndex].type === 'MOVIE') {
+            alert('動画スライドより上に移動することはできません。');
+            return;
+        }
+
+        // Swap
+        [newSlides[index], newSlides[targetIndex]] = [newSlides[targetIndex], newSlides[index]];
+
+        try {
+            await updateDoc(doc(db, 'projects', projectId), {
+                slideshowSettings: newSlides
+            });
+            onUpdate();
+        } catch (error) {
+            console.error("Error reordering slides:", error);
+            alert('並び替えに失敗しました');
+        }
+    };
 
     const handleAddSlide = async () => {
         if (!projectId) return;
@@ -59,9 +97,17 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
             };
 
             if (newType === 'MOVIE') {
-                newSlide.content = newContent; // YouTube URL etc.
+                if (movieFile) {
+                    const storageRef = ref(storage, `projects/${projectId}/slideshow/videos/${Date.now()}_${movieFile.name}`);
+                    const snapshot = await uploadBytes(storageRef, movieFile);
+                    const downloadUrl = await getDownloadURL(snapshot.ref);
+
+                    newSlide.content = downloadUrl;
+                    newSlide.storagePath = snapshot.ref.fullPath;
+                } else {
+                    newSlide.content = newContent;
+                }
             } else if (newType === 'DESCRIPTION') {
-                // Upload Background Image if exists
                 if (descBgFile) {
                     const storageRef = ref(storage, `projects/${projectId}/slideshow/${Date.now()}_desc_${descBgFile.name}`);
                     const snapshot = await uploadBytes(storageRef, descBgFile);
@@ -69,15 +115,13 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                     newSlide.imageUrl = downloadUrl;
                     newSlide.storagePath = snapshot.ref.fullPath;
                 }
-                newSlide.content = newContent; // Short Message
+                newSlide.content = newContent;
             } else if (newType === 'AFTER' && beforeFile && afterFile) {
-                // Upload Before Image
                 const beforePath = `projects/${projectId}/slideshow/${Date.now()}_before_${beforeFile.name}`;
                 const beforeStorageRef = ref(storage, beforePath);
                 const beforeSnapshot = await uploadBytes(beforeStorageRef, beforeFile);
                 const beforeUrl = await getDownloadURL(beforeSnapshot.ref);
 
-                // Upload After Image
                 const afterPath = `projects/${projectId}/slideshow/${Date.now()}_after_${afterFile.name}`;
                 const afterStorageRef = ref(storage, afterPath);
                 const afterSnapshot = await uploadBytes(afterStorageRef, afterFile);
@@ -88,13 +132,23 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                 newSlide.beforeStoragePath = beforeSnapshot.ref.fullPath;
                 newSlide.afterStoragePath = afterSnapshot.ref.fullPath;
 
-                // Legacy support / fallback for content field if needed
                 newSlide.content = afterUrl;
             }
 
-            // Update Firestore
+            // AUTO SORT Logic:
+            // Combine existing slides + new slide
+            let updatedSlides = [...slides, newSlide];
+
+            // Sort: MOVIE always comes first
+            updatedSlides.sort((a, b) => {
+                if (a.type === 'MOVIE' && b.type !== 'MOVIE') return -1;
+                if (a.type !== 'MOVIE' && b.type === 'MOVIE') return 1;
+                return 0; // Maintain relative order otherwise
+            });
+
+            // Update Firestore with sorted array
             await updateDoc(doc(db, 'projects', projectId), {
-                slideshowSettings: arrayUnion(newSlide)
+                slideshowSettings: updatedSlides
             });
 
             onUpdate();
@@ -103,6 +157,7 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
             setBeforeFile(null);
             setAfterFile(null);
             setDescBgFile(null);
+            setMovieFile(null);
             alert('スライドを追加しました');
 
         } catch (error) {
@@ -117,7 +172,6 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
         if (!confirm('このスライドを削除しますか？')) return;
 
         try {
-            // Delete images from storage if applicable
             if (slide.storagePath) {
                 const storageRef = ref(storage, slide.storagePath);
                 await deleteObject(storageRef).catch(err => console.warn("Storage delete warn:", err));
@@ -131,9 +185,10 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                 await deleteObject(storageRef).catch(err => console.warn("Storage delete warn:", err));
             }
 
-            // Remove from Firestore
+            const updatedSlides = slides.filter(s => s.id !== slide.id);
+
             await updateDoc(doc(db, 'projects', projectId), {
-                slideshowSettings: arrayRemove(slide)
+                slideshowSettings: updatedSlides
             });
 
             onUpdate();
@@ -151,7 +206,35 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                 <div className="space-y-3">
                     {slides.map((slide, index) => (
                         <div key={slide.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-blue-300 transition-colors group">
-                            <div className="flex items-center gap-4 overflow-hidden">
+                            <div className="flex items-center gap-4 overflow-hidden flex-grow">
+                                {/* Sort Buttons */}
+                                <div className="flex flex-col gap-1 mr-2">
+                                    {slide.type !== 'MOVIE' && index > 0 && slides[index - 1].type !== 'MOVIE' && (
+                                        <button
+                                            onClick={() => handleMoveSlide(index, 'up')}
+                                            className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-600"
+                                            title="上へ"
+                                        >
+                                            <ArrowUp className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                    {slide.type !== 'MOVIE' && index < slides.length - 1 && (
+                                        <button
+                                            onClick={() => handleMoveSlide(index, 'down')}
+                                            className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-600"
+                                            title="下へ"
+                                        >
+                                            <ArrowDown className="w-4 h-4" />
+                                        </button>
+                                    )}
+
+                                    {slide.type === 'MOVIE' && (
+                                        <div className="p-1 text-gray-300" title="固定">
+                                            <Lock className="w-4 h-4 opacity-50" />
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className={`p-2 rounded-lg flex-shrink-0 ${slide.type === 'MOVIE' ? 'bg-red-100 text-red-600' :
                                         slide.type === 'AFTER' ? 'bg-blue-100 text-blue-600' :
                                             'bg-green-100 text-green-600'
@@ -161,18 +244,30 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                     {slide.type === 'DESCRIPTION' && <FileText className="h-5 w-5" />}
                                 </div>
                                 <div className="min-w-0">
-                                    <p className="text-sm font-bold text-gray-900">
+                                    <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                                         {TYPE_LABELS[slide.type] || slide.type}
+                                        {slide.type === 'MOVIE' && <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded border border-red-100">先頭固定</span>}
                                     </p>
-                                    <p className="text-sm text-gray-500 truncate mt-0.5">
-                                        {slide.type === 'DESCRIPTION' ? slide.content : slide.type === 'AFTER' ? '画像2枚セット' : slide.content}
-                                    </p>
+                                    <div className="text-sm text-gray-500 truncate mt-0.5 flex items-center gap-2">
+                                        {slide.type === 'MOVIE' && (
+                                            slide.content.startsWith('http') && !slide.content.includes('youtube') && !slide.content.includes('youtu.be') ? (
+                                                <div className="text-xs text-blue-600 flex items-center gap-1">
+                                                    <Video className="w-3 h-3" />
+                                                    <span>アップロード動画</span>
+                                                </div>
+                                            ) : (
+                                                <span>{slide.content}</span>
+                                            )
+                                        )}
+                                        {slide.type === 'DESCRIPTION' && slide.content}
+                                        {slide.type === 'AFTER' && '画像2枚セット'}
+                                    </div>
                                 </div>
                             </div>
 
                             <button
                                 onClick={() => handleDeleteSlide(slide)}
-                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100 ml-4"
                                 title="削除"
                             >
                                 <Trash2 className="h-4 w-4" />
@@ -225,19 +320,35 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                         {/* Dynamic Input */}
                         <div>
                             <label className="block text-xs font-semibold text-gray-700 mb-2">
-                                {newType === 'MOVIE' && '動画のURL (YouTube/Vimeo)'}
+                                {newType === 'MOVIE' && '動画ファイル (mp4等) または URL'}
                                 {newType === 'AFTER' && 'Before/After画像のアップロード'}
                                 {newType === 'DESCRIPTION' && 'メッセージ設定'}
                             </label>
 
                             {newType === 'MOVIE' && (
-                                <input
-                                    type="text"
-                                    value={newContent}
-                                    onChange={(e) => setNewContent(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                                    placeholder="https://youtu.be/..."
-                                />
+                                <div className="space-y-3">
+                                    <div className="border border-gray-300 rounded-lg p-3 bg-red-50">
+                                        <p className="text-xs font-bold text-red-600 mb-2">動画ファイルをアップロード (推奨)</p>
+                                        <input
+                                            type="file"
+                                            accept="video/*"
+                                            onChange={(e) => setMovieFile(e.target.files?.[0] || null)}
+                                            className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-red-100 file:text-red-700 hover:file:bg-red-200"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">※ 10MB未満推奨 / フルスクリーンオープニングに対応</p>
+                                    </div>
+                                    <div className="relative flex items-center gap-2">
+                                        <span className="text-xs text-gray-400">または</span>
+                                        <div className="border-t border-gray-200 flex-grow"></div>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={newContent}
+                                        onChange={(e) => setNewContent(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                                        placeholder="動画URL (YouTubeなど - オープニング非対応)"
+                                    />
+                                </div>
                             )}
 
                             {newType === 'AFTER' && (
@@ -293,12 +404,12 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                             onClick={handleAddSlide}
                             disabled={
                                 uploading ||
-                                (newType === 'MOVIE' && !newContent) ||
+                                (newType === 'MOVIE' && !newContent && !movieFile) ||
                                 (newType === 'DESCRIPTION' && !newContent) ||
                                 (newType === 'AFTER' && (!beforeFile || !afterFile))
                             }
                             className={`w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center justify-center gap-2 ${(uploading ||
-                                    (newType === 'MOVIE' && !newContent) ||
+                                    (newType === 'MOVIE' && !newContent && !movieFile) ||
                                     (newType === 'DESCRIPTION' && (!newContent || !descBgFile)) ||
                                     (newType === 'AFTER' && (!beforeFile || !afterFile))) ? 'opacity-50 cursor-not-allowed' : ''
                                 }`}
