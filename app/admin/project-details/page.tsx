@@ -5,9 +5,279 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { Upload, X, Check, Image as ImageIcon, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { Upload, X, Check, Image as ImageIcon, Trash2, ArrowLeft, Loader2, FolderArchive, FileArchive, Plus, FileText, MonitorPlay } from 'lucide-react';
 import Link from 'next/link';
 import Gallery from '@/components/Gallery';
+import SlideshowManager, { SlideshowSlide } from './SlideshowManager';
+import { updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import JSZip from 'jszip';
+
+interface DownloadSection {
+    title: string;
+    url: string;
+    fileName: string;
+    size: string;
+    count: number;
+    storagePath: string;
+}
+
+function DownloadManager({ projectId, downloadSections, onUpdate }: { projectId: string; downloadSections: DownloadSection[]; onUpdate: () => void }) {
+    const [uploading, setUploading] = useState(false);
+    const [progress, setProgress] = useState<{ label: string; percent: number }>({ label: '', percent: 0 });
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [title, setTitle] = useState('');
+    const [count, setCount] = useState<number>(0);
+
+    const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const files = Array.from(e.target.files);
+            setSelectedFiles(files);
+
+            // Auto-fill title and count
+            if (!title) {
+                if (files.length === 1) {
+                    setTitle(files[0].name.replace(/\.[^/.]+$/, ""));
+                } else {
+                    setTitle(`${files.length}枚のセット`);
+                }
+            }
+            if (count === 0) {
+                setCount(files.length);
+            }
+        }
+    };
+
+    const handleUpload = async () => {
+        if (selectedFiles.length === 0 || !title) return;
+        setUploading(true);
+        setProgress({ label: '準備中...', percent: 0 });
+
+        try {
+            let fileToUpload: Blob | File = selectedFiles[0];
+            let fileName = selectedFiles[0].name;
+
+            // If multiple files, ZIP them
+            if (selectedFiles.length > 1) {
+                setProgress({ label: 'ファイルを圧縮中...', percent: 10 });
+                const zip = new JSZip();
+
+                // Add files to root of zip
+                selectedFiles.forEach(file => {
+                    zip.file(file.name, file);
+                });
+
+                fileToUpload = await zip.generateAsync({
+                    type: 'blob',
+                    compression: 'DEFLATE',
+                    compressionOptions: { level: 6 }
+                }, (metadata) => {
+                    setProgress({ label: '圧縮中...', percent: metadata.percent });
+                });
+
+                fileName = `${title}.zip`;
+            }
+
+            setProgress({ label: 'アップロード中...', percent: 0 });
+
+            // Upload to Firebase Storage
+            const path = `projects/${projectId}/downloads/${Date.now()}_${fileName}`;
+            const storageRef = ref(storage, path);
+
+            // Use uploadBytesResumable for progress (optional but good for large files)
+            // For simplicity in this implementation we use uploadBytes but we can't track upload progress easily without 'uploadBytesResumable'
+            // Let's use uploadBytes for now as it's simpler and 'uploading' state handles the UI spinner
+            const snapshot = await uploadBytes(storageRef, fileToUpload);
+
+            setProgress({ label: 'URL取得中...', percent: 90 });
+            const downloadUrl = await getDownloadURL(snapshot.ref);
+
+            // Format size
+            const sizeInBytes = fileToUpload.size;
+            let sizeStr = '';
+            if (sizeInBytes < 1024 * 1024) {
+                sizeStr = `${(sizeInBytes / 1024).toFixed(1)} KB`;
+            } else {
+                sizeStr = `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+            }
+
+            const newSection: DownloadSection = {
+                title,
+                url: downloadUrl,
+                fileName: fileName,
+                size: sizeStr,
+                count: count || selectedFiles.length,
+                storagePath: snapshot.ref.fullPath
+            };
+
+            await updateDoc(doc(db, 'projects', projectId), {
+                downloadSections: arrayUnion(newSection)
+            });
+
+            setProgress({ label: '完了！', percent: 100 });
+            alert('納品用データを追加しました');
+
+            // Reset form
+            setSelectedFiles([]);
+            setTitle('');
+            setCount(0);
+            setProgress({ label: '', percent: 0 });
+
+            // Reload parent to show new item
+            onUpdate();
+        } catch (error) {
+            console.error("Upload Failed", error);
+            alert("アップロードに失敗しました");
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleDelete = async (section: DownloadSection) => {
+        if (!confirm(`「${section.title}」を削除しますか？`)) return;
+
+        try {
+            const storageRef = ref(storage, section.storagePath);
+            await deleteObject(storageRef).catch(err => console.warn("Storage delete warn:", err));
+
+            await updateDoc(doc(db, 'projects', projectId), {
+                downloadSections: arrayRemove(section)
+            });
+
+            onUpdate();
+        } catch (error) {
+            console.error("Delete Failed", error);
+            alert("削除に失敗しました");
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* List Existing Sections */}
+            {downloadSections.length > 0 && (
+                <div className="space-y-3">
+                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">登録済みデータ</h3>
+                    {downloadSections.map((section, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-white hover:bg-orange-50 rounded-lg border border-gray-200 hover:border-orange-200 transition-colors group">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                <div className="p-2 bg-orange-100 text-orange-600 rounded-md">
+                                    <FolderArchive className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-sm font-bold text-gray-900 truncate">{section.title}</p>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                        <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{section.fileName}</span>
+                                        <span>•</span>
+                                        <span>{section.count}枚 / {section.size}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => handleDelete(section)}
+                                className="text-gray-300 hover:text-red-500 p-2 rounded-full hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                                title="削除"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Upload New Area */}
+            <div className={`border-2 border-dashed rounded-xl p-6 transition-colors ${selectedFiles.length > 0 ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200 bg-gray-50 hover:bg-gray-100/50'}`}>
+                <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">新規データの追加</h3>
+                    <p className="text-xs text-gray-500">
+                        複数の写真を選択すると、自動的にZIPファイルに圧縮してアップロードされます。
+                    </p>
+                </div>
+
+                {!selectedFiles.length ? (
+                    <div className="relative group cursor-pointer text-center py-8">
+                        <input
+                            type="file"
+                            multiple
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            onChange={handleFilesChange}
+                        />
+                        <div className="mx-auto h-12 w-12 bg-white text-blue-500 rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                            <Plus className="h-6 w-6" />
+                        </div>
+                        <p className="text-sm font-medium text-gray-700">ファイルを選択 または ドロップ</p>
+                        <p className="text-xs text-gray-400 mt-1">画像複数, ZIPファイルなど</p>
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                                    {selectedFiles.length > 1 ? <FolderArchive className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-gray-900 truncate max-w-[180px]">
+                                        {selectedFiles.length > 1 ? `${selectedFiles.length}個のファイル` : selectedFiles[0].name}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        {selectedFiles.length > 1 ? '自動的にZIP化されます' : (selectedFiles[0].size / 1024 / 1024).toFixed(2) + ' MB'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={() => { setSelectedFiles([]); setTitle(''); setCount(0); }} className="text-gray-400 hover:text-red-500 p-1">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3 pl-1">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1.5">ボタンの表示タイトル</label>
+                                <input
+                                    type="text"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-shadow"
+                                    placeholder="例: 全データ一括ダウンロード"
+                                />
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">写真枚数</label>
+                                    <input
+                                        type="number"
+                                        value={count}
+                                        onChange={(e) => setCount(Number(e.target.value))}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-shadow"
+                                        placeholder="0"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleUpload}
+                            disabled={uploading || !title}
+                            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                        >
+                            {uploading ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>{progress.label} {progress.percent > 0 && `(${progress.percent.toFixed(0)}%)`}</span>
+                                </>
+                            ) : (
+                                'この内容で追加'
+                            )}
+                        </button>
+
+                        {uploading && (
+                            <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2 overflow-hidden">
+                                <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${progress.percent}%` }}></div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
 
 function ProjectDetailsContent() {
     const searchParams = useSearchParams();
@@ -19,51 +289,60 @@ function ProjectDetailsContent() {
     const [uploading, setUploading] = useState(false);
     const [files, setFiles] = useState<File[]>([]);
     const [success, setSuccess] = useState('');
+    // Slideshow state
+    const [slides, setSlides] = useState<SlideshowSlide[]>([]);
+
     const router = useRouter();
 
-    useEffect(() => {
+    const fetchData = async () => {
         if (!projectId) return;
+        try {
+            // 1. Fetch Project Details
+            const docRef = doc(db, 'projects', projectId);
+            const docSnap = await getDoc(docRef);
 
-        const fetchData = async () => {
-            try {
-                // 1. Fetch Project Details
-                const docRef = doc(db, 'projects', projectId);
-                const docSnap = await getDoc(docRef);
-
-                if (docSnap.exists()) {
-                    setProject({ id: docSnap.id, ...docSnap.data() });
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setProject({ id: docSnap.id, ...data });
+                // Set initial slides
+                if (data.slideshowSettings) {
+                    setSlides(data.slideshowSettings);
                 } else {
-                    // Try legacy 'clients' check just in case or just 404
-                    const clientRef = doc(db, 'clients', projectId);
-                    const clientSnap = await getDoc(clientRef);
-                    if (clientSnap.exists()) {
-                        setProject({ id: clientSnap.id, ...clientSnap.data() });
-                    }
+                    setSlides([]);
                 }
-
-                // 2. Fetch Photos
-                const q = query(
-                    collection(db, 'albums'),
-                    where('clientId', '==', projectId)
-                );
-
-                const querySnapshot = await getDocs(q);
-                const fetchedPhotos: any[] = [];
-                querySnapshot.forEach((doc) => {
-                    fetchedPhotos.push({ id: doc.id, ...doc.data() });
-                });
-                // Manual sort if index missing
-                fetchedPhotos.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-
-                setPhotos(fetchedPhotos);
-
-            } catch (error) {
-                console.error("Error fetching data:", error);
-            } finally {
-                setLoading(false);
+            } else {
+                // Try legacy 'clients' check just in case or just 404
+                const clientRef = doc(db, 'clients', projectId);
+                const clientSnap = await getDoc(clientRef);
+                if (clientSnap.exists()) {
+                    setProject({ id: clientSnap.id, ...clientSnap.data() });
+                }
             }
-        };
 
+            // 2. Fetch Photos
+            const q = query(
+                collection(db, 'albums'),
+                where('clientId', '==', projectId)
+            );
+
+            const querySnapshot = await getDocs(q);
+            const fetchedPhotos: any[] = [];
+            querySnapshot.forEach((doc) => {
+                fetchedPhotos.push({ id: doc.id, ...doc.data() });
+            });
+            // Manual sort if index missing
+            fetchedPhotos.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
+            setPhotos(fetchedPhotos);
+
+        } catch (error) {
+            console.error("Error fetching data:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchData();
     }, [projectId]);
 
@@ -75,6 +354,18 @@ function ProjectDetailsContent() {
 
     const removeFile = (index: number) => {
         setFiles(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                resolve({ width: img.width, height: img.height });
+                URL.revokeObjectURL(img.src);
+            };
+            img.onerror = (error) => reject(error);
+            img.src = URL.createObjectURL(file);
+        });
     };
 
     const handleUpload = async () => {
@@ -94,6 +385,9 @@ function ProjectDetailsContent() {
             const uploadPromises = files.map(async (file) => {
                 const path = `projects/${projectId}/photos/${Date.now()}_${file.name}`;
 
+                // Get Dimensions
+                const { width, height } = await getImageDimensions(file);
+
                 // Storage Upload
                 const storageRef = ref(storage, path);
                 const snapshot = await uploadBytes(storageRef, file);
@@ -106,6 +400,8 @@ function ProjectDetailsContent() {
                     fileName: file.name,
                     storagePath: snapshot.ref.fullPath,
                     url: downloadUrl,
+                    width,
+                    height,
                     createdAt: serverTimestamp(),
                     type: 'client_delivery'
                 });
@@ -115,7 +411,9 @@ function ProjectDetailsContent() {
                     clientId: projectId,
                     fileName: file.name,
                     url: downloadUrl,
-                    storagePath: snapshot.ref.fullPath
+                    storagePath: snapshot.ref.fullPath,
+                    width,
+                    height
                 };
             });
 
@@ -221,9 +519,28 @@ function ProjectDetailsContent() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Left Column: Upload */}
+                    {/* Left Column: Upload & Downloads & Slideshow */}
                     <div className="lg:col-span-1 space-y-6">
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-8">
+
+                        {/* 0. Slideshow Settings */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <MonitorPlay className="h-5 w-5 text-blue-600" />
+                                スライドショー設定
+                            </h2>
+                            <p className="text-xs text-gray-500 mb-4">
+                                納品ページのトップに表示するコンテンツ（動画、現像後比較、メッセージなど）を管理します。
+                            </p>
+
+                            <SlideshowManager
+                                projectId={projectId}
+                                slides={slides}
+                                onUpdate={fetchData}
+                            />
+                        </div>
+
+                        {/* 1. Photo Upload */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                                 <Upload className="h-5 w-5 text-blue-600" />
                                 写真を追加
@@ -279,6 +596,19 @@ function ProjectDetailsContent() {
                                     {success}
                                 </div>
                             )}
+                        </div>
+
+                        {/* 2. Download Data Management */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <FolderArchive className="h-5 w-5 text-orange-500" />
+                                納品用データ管理
+                            </h2>
+                            <p className="text-xs text-gray-500 mb-4">
+                                ここにアップロードされたファイルは、クライアントポータルのボタンに直接紐付きます。
+                            </p>
+
+                            <DownloadManager projectId={projectId} downloadSections={project?.downloadSections || []} onUpdate={() => window.location.reload()} />
                         </div>
                     </div>
 
