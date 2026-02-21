@@ -170,13 +170,16 @@ export default function Gallery({
                 // 1. Single Image Download
                 const photo = selectedPhotos[0];
                 try {
-                    const encodedUrl = encodeURIComponent(photo.url);
                     console.log(`[1/1] Fetching: ${photo.fileName || photo.id}`);
 
-                    const response = await fetch(`/api/proxy-image?url=${encodedUrl}`);
+                    // CORSエラー回避: mode: 'cors' とキャッシュ無効化クエリ
+                    const fetchUrl = `${photo.url}${photo.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+                    const response = await fetch(fetchUrl, {
+                        mode: 'cors',
+                    });
 
                     if (!response.ok) {
-                        throw new Error(`Proxy error: ${response.status} ${response.statusText}`);
+                        throw new Error(`Fetch error: ${response.status} ${response.statusText}`);
                     }
 
                     const blob = await response.blob();
@@ -200,13 +203,16 @@ export default function Gallery({
 
                 await Promise.all(selectedPhotos.map(async (photo, index) => {
                     try {
-                        const encodedUrl = encodeURIComponent(photo.url);
                         console.log(`[${index + 1}/${total}] Fetching for ZIP: ${photo.fileName || photo.id}`);
 
-                        const response = await fetch(`/api/proxy-image?url=${encodedUrl}`);
+                        // CORSエラー回避: mode: 'cors' とキャッシュ無効化クエリ
+                        const fetchUrl = `${photo.url}${photo.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+                        const response = await fetch(fetchUrl, {
+                            mode: 'cors',
+                        });
 
                         if (!response.ok) {
-                            throw new Error(`Proxy error: ${response.status} ${response.statusText}`);
+                            throw new Error(`Fetch error: ${response.status} ${response.statusText}`);
                         }
 
                         const blob = await response.blob();

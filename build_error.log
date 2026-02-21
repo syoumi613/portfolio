@@ -1,0 +1,24 @@
+
+> portfolio@0.1.0 build
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.5s
+  Running TypeScript ...
+  Collecting page data using 11 workers ...
+Error: export const dynamic = "force-static"/export const revalidate not configured on route "/api/proxy-image" with "output: export". See more info here: https://nextjs.org/docs/advanced-features/static-html-export
+    at module evaluation (C:\ポートフォリオサイト作成\portfolio\.next\server\chunks\[root-of-the-server]__f29c1a1c._.js:1:1805)
+    at instantiateModule (C:\ポートフォリオサイト作成\portfolio\.next\server\chunks\[turbopack]_runtime.js:740:9)
+    at instantiateRuntimeModule (C:\ポートフォリオサイト作成\portfolio\.next\server\chunks\[turbopack]_runtime.js:768:12)
+    at getOrInstantiateRuntimeModule (C:\ポートフォリオサイト作成\portfolio\.next\server\chunks\[turbopack]_runtime.js:781:12)
+    at Object.m (C:\ポートフォリオサイト作成\portfolio\.next\server\chunks\[turbopack]_runtime.js:790:18)
+    at Object.<anonymous> (C:\ポートフォリオサイト作成\portfolio\.next\server\app\api\proxy-image\route.js:5:3)
+
+> Build error occurred
+Error: Failed to collect page data for /api/proxy-image
+    at ignore-listed frames {
+  type: 'Error'
+}
