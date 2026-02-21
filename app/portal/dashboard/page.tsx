@@ -4,12 +4,13 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, doc, getDoc, limit, addDoc, serverTimestamp, setDoc, increment, deleteDoc, updateDoc } from 'firebase/firestore';
 import { LogOut, Download, FolderDown, Loader2, Archive, FolderArchive, X, SkipForward } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Gallery from '@/components/Gallery';
 import HeroSlider from '@/components/HeroSlider';
 import BeforeAfterSlider from '@/components/BeforeAfterSlider';
+import PopularPhotosSlide from '@/components/PopularPhotosSlide';
 
 interface Photo {
     id: string;
@@ -32,13 +33,15 @@ interface DownloadSection {
 
 interface SlideshowSlide {
     id: string;
-    type: 'MOVIE' | 'AFTER' | 'DESCRIPTION';
+    type: 'MOVIE' | 'AFTER' | 'DESCRIPTION' | 'OFFER' | 'POPULAR';
     title: string;
     content: string;
     storagePath?: string;
     beforeUrl?: string;
     afterUrl?: string;
     imageUrl?: string;
+    buttonText?: string;
+    linkUrl?: string;
 }
 
 export default function ClientDashboard() {
@@ -47,11 +50,17 @@ export default function ClientDashboard() {
     const [downloadSections, setDownloadSections] = useState<DownloadSection[]>([]);
     const [slideshowSettings, setSlideshowSettings] = useState<SlideshowSlide[]>([]);
     const [projectName, setProjectName] = useState('');
+    const [projectData, setProjectData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [topPhotos, setTopPhotos] = useState<any[]>([]);
 
     // Preloader State
     const [isAssetsLoaded, setIsAssetsLoaded] = useState(false);
     const [loadingProgress, setLoadingProgress] = useState(0);
+
+    // Like State
+    const [likedPhotoIds, setLikedPhotoIds] = useState<Set<string>>(new Set());
+    const processingLikesRef = useRef<Set<string>>(new Set());
 
     // Tab State
     const [activeTabId, setActiveTabId] = useState<string>('');
@@ -67,6 +76,7 @@ export default function ClientDashboard() {
     const openingVideoRef = useRef<HTMLVideoElement>(null);
 
     const router = useRouter();
+    const isTracked = useRef(false);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -100,9 +110,16 @@ export default function ClientDashboard() {
                                 return 0;
                             });
 
-                            slides = sortedSettings;
-                            setSlideshowSettings(sortedSettings);
-                            setActiveTabId(sortedSettings[0].id);
+                            // Filter out POPULAR slide if likes are disabled at the project level
+                            const finalSlides = data.isLikeEnabled === false
+                                ? sortedSettings.filter(s => s.type !== 'POPULAR')
+                                : sortedSettings;
+
+                            slides = finalSlides;
+                            setSlideshowSettings(finalSlides);
+                            if (finalSlides.length > 0) {
+                                setActiveTabId(finalSlides[0].id);
+                            }
 
                             // Check for MOVIE slide for Opening
                             const movieSlide = sortedSettings.find((s: SlideshowSlide) => s.type === 'MOVIE');
@@ -125,6 +142,34 @@ export default function ClientDashboard() {
                         setShowOpening(false);
                     }
                     setProjectName(getName);
+                    if (projectSnap.exists()) {
+                        setProjectData(projectSnap.data());
+                    }
+
+                    // Analytics Tracking
+                    if (!isTracked.current) {
+                        isTracked.current = true;
+
+                        // Exclude Admin Tracking
+                        const isAdmin = typeof window !== 'undefined' && localStorage.getItem('isAdmin') === 'true';
+
+                        if (!isAdmin) {
+                            try {
+                                await setDoc(doc(db, 'projects', clientId), {
+                                    pageViews: increment(1)
+                                }, { merge: true });
+
+                                await addDoc(collection(db, 'projects', clientId, 'logs'), {
+                                    type: 'view',
+                                    timestamp: serverTimestamp()
+                                });
+                            } catch (e) {
+                                console.error("Failed to track view analytics", e);
+                            }
+                        } else {
+                            console.log('Skipping project page tracking for Admin');
+                        }
+                    }
 
                     const q = query(
                         collection(db, 'albums'),
@@ -142,6 +187,55 @@ export default function ClientDashboard() {
                     });
 
                     setPhotos(fetchedPhotos);
+
+                    // Fetch Top 4 Popular Photos
+                    try {
+                        const likesQ = query(
+                            collection(db, 'image_likes'),
+                            orderBy('likeCount', 'desc'),
+                            limit(4)
+                        );
+                        const likesSnap = await getDocs(likesQ);
+                        const popularList: any[] = [];
+
+                        likesSnap.forEach(d => {
+                            const data = d.data();
+                            // Only include if count > 0 and the photo belongs to this album
+                            if (data.likeCount > 0) {
+                                const matchingPhoto = fetchedPhotos.find(p => p.id === d.id);
+                                if (matchingPhoto) {
+                                    popularList.push({
+                                        id: matchingPhoto.id,
+                                        url: matchingPhoto.url,
+                                        likeCount: data.likeCount
+                                    });
+                                }
+                            }
+                        });
+
+                        setTopPhotos(popularList);
+
+                    } catch (e) {
+                        console.error("Failed to fetch popular photos", e);
+                    }
+
+                    // Fetch user's favorite photos
+                    try {
+                        const favQ = query(
+                            collection(db, 'favorites'),
+                            where('userId', '==', currentUser.uid),
+                            where('clientId', '==', clientId)
+                        );
+                        const favSnap = await getDocs(favQ);
+                        const newLikedIds = new Set<string>();
+                        favSnap.forEach(d => {
+                            newLikedIds.add(d.data().photoId);
+                        });
+                        setLikedPhotoIds(newLikedIds);
+                    } catch (e) {
+                        console.error("Failed to fetch favorites", e);
+                    }
+
                     setLoading(false);
 
                     // --- PRELOADING LOGIC ---
@@ -281,6 +375,32 @@ export default function ClientDashboard() {
         document.body.removeChild(link);
 
         setTimeout(() => {
+            // Track Analytics
+            (async () => {
+                // Exclude Admin Tracking
+                if (typeof window !== 'undefined' && localStorage.getItem('isAdmin') === 'true') {
+                    console.log('Skipping ZIP download tracking for Admin');
+                    return;
+                }
+
+                try {
+                    const clientId = user?.email?.split('@')[0];
+                    if (clientId) {
+                        await setDoc(doc(db, 'projects', clientId), {
+                            downloadCount: increment(1)
+                        }, { merge: true });
+
+                        await addDoc(collection(db, 'projects', clientId, 'logs'), {
+                            type: 'download',
+                            timestamp: serverTimestamp(),
+                            details: `ZIP: ${selectedDownload.title} (${selectedDownload.count}枚)`
+                        });
+                    }
+                } catch (e) {
+                    console.error("Failed to track download analytics", e);
+                }
+            })();
+
             closeDownloadModal();
             setDownloading(false);
         }, 1500);
@@ -301,9 +421,101 @@ export default function ClientDashboard() {
         setShowOpening(false);
     };
 
+    const handleDownloadLog = async (details: string) => {
+        // Exclude Admin Tracking
+        if (typeof window !== 'undefined' && localStorage.getItem('isAdmin') === 'true') {
+            console.log('Skipping gallery bulk download tracking for Admin');
+            return;
+        }
+
+        try {
+            const clientId = user?.email?.split('@')[0];
+            if (clientId) {
+                await setDoc(doc(db, 'projects', clientId), {
+                    downloadCount: increment(1)
+                }, { merge: true });
+
+                await addDoc(collection(db, 'projects', clientId, 'logs'), {
+                    type: 'download',
+                    timestamp: serverTimestamp(),
+                    details
+                });
+            }
+        } catch (e) {
+            console.error("Failed to track gallery download analytics", e);
+        }
+    };
+
     // Combined Loading Logic: Show Preloader if initial auth loading OR assets not loaded
     // This prevents the legacy spinner from flashing.
     const showPreloader = loading || !isAssetsLoaded;
+
+    const handleToggleLike = async (photo: any) => {
+        if (!user) return;
+        const clientId = user.email?.split('@')[0];
+        if (!clientId) return;
+
+        // 二重クリック（連打）防止のための処理中フラグ判定
+        if (processingLikesRef.current.has(photo.id)) return;
+        processingLikesRef.current.add(photo.id);
+
+        const isLiked = likedPhotoIds.has(photo.id);
+        const favoriteDocId = `${user.uid}_${photo.id}`;
+
+        // 楽観的更新 (Optimistic Update): Firestoreの完了を待たずにUI状態を反転
+        setLikedPhotoIds(prev => {
+            const newSet = new Set(prev);
+            if (isLiked) {
+                newSet.delete(photo.id);
+            } else {
+                newSet.add(photo.id);
+            }
+            return newSet;
+        });
+
+        try {
+            if (isLiked) {
+                // Remove like
+                await deleteDoc(doc(db, 'favorites', favoriteDocId));
+                // Decrement global like count
+                const likeRef = doc(db, 'image_likes', photo.id);
+                const likeSnap = await getDoc(likeRef);
+                if (likeSnap.exists() && likeSnap.data().likeCount > 0) {
+                    await updateDoc(likeRef, {
+                        likeCount: increment(-1)
+                    });
+                }
+            } else {
+                // Add like
+                await setDoc(doc(db, 'favorites', favoriteDocId), {
+                    userId: user.uid,
+                    clientId: clientId,
+                    photoId: photo.id,
+                    createdAt: serverTimestamp()
+                });
+                // Increment global like count
+                await setDoc(doc(db, 'image_likes', photo.id), {
+                    likeCount: increment(1)
+                }, { merge: true });
+            }
+        } catch (error) {
+            console.error('Failed to toggle like', error);
+            // エラーが発生した場合は、楽観的更新をロールバック（元の状態に戻す）
+            setLikedPhotoIds(prev => {
+                const newSet = new Set(prev);
+                if (isLiked) {
+                    newSet.add(photo.id);
+                } else {
+                    newSet.delete(photo.id);
+                }
+                return newSet;
+            });
+            alert('通信エラーが発生しました。いいねの状態を元に戻しました。');
+        } finally {
+            // 処理中フラグの解除
+            processingLikesRef.current.delete(photo.id);
+        }
+    };
 
     // Determine if we should render content (only if user exists and not in initial auth load)
     // Note: showPreloader handles the visual overlay, but we need to prevent content rendering errors if user is null during loading.
@@ -371,17 +583,17 @@ export default function ClientDashboard() {
                         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.4)_100%)] pointer-events-none z-10" />
 
                         {/* Cinematic Title Overlay */}
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                             <motion.h2
                                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                                 animate={{ opacity: [0, 1, 1, 0], scale: [0.95, 1, 1, 1.05], y: [10, 0, 0, -10] }}
                                 transition={{
-                                    duration: 6,
-                                    times: [0, 0.15, 0.85, 1],
+                                    duration: 10,
+                                    times: [0, 0.1, 0.9, 1],
                                     delay: 0.4,
                                     ease: "easeInOut"
                                 }}
-                                className="text-3xl md:text-5xl text-white font-sans font-medium tracking-[0.2em] text-center px-4 [text-shadow:0_4px_24px_rgba(0,0,0,0.8)]"
+                                className="relative z-20 w-full overflow-hidden text-ellipsis whitespace-nowrap px-4 text-center font-sans font-black text-white mix-blend-difference text-xl tracking-[0.1em] sm:text-2xl sm:tracking-[0.15em] md:px-6 md:text-5xl md:tracking-[0.3em] lg:text-7xl lg:tracking-[0.4em]"
                             >
                                 {projectName}
                             </motion.h2>
@@ -404,36 +616,23 @@ export default function ClientDashboard() {
                     animate={{ opacity: showOpening ? 0 : 1 }} // Stay hidden while opening plays
                     transition={{ duration: 1.5, ease: "easeInOut", delay: showOpening ? 0.5 : 0 }}
                 >
-                    <nav className="border-b border-gray-100 sticky top-0 bg-white/80 backdrop-blur-md z-40">
-                        <div className="w-full px-4 sm:px-6 lg:px-8">
-                            <div className="flex justify-between h-16 items-center">
-                                <div className="flex items-center gap-4">
-                                    <h1 className="text-xl font-light text-gray-900 tracking-wide">プロジェクトアルバム</h1>
-                                    <div className="flex gap-2 ml-4">
-                                        <button onClick={() => router.push('/')} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1 rounded-full transition-colors">
-                                            トップ
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-6">
-                                    <span className="text-sm font-medium text-gray-900 hidden sm:block">
-                                        {projectName}
-                                    </span>
-                                </div>
-                            </div>
+                    <main className="w-full pt-20">
+                        {/* Project Title Header */}
+                        <div className="pt-6 pb-2 text-center px-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                            <h2 className="text-xl md:text-2xl font-bold text-gray-800 tracking-[0.2em] uppercase">
+                                {projectName}
+                            </h2>
                         </div>
-                    </nav>
-
-                    <main className="w-full">
                         {/* Slideshow Config */}
                         {slideshowSettings.length > 0 && (
-                            <section className="px-4 pt-8 pb-4">
-                                <div className="max-w-[1200px] mx-auto space-y-4">
+                            <section className="px-4 pt-4 pb-4">
+                                <div className="max-w-4xl mx-auto space-y-4">
                                     {/* Content Container */}
-                                    <div className="w-full aspect-[3/2] relative rounded-lg overflow-hidden shadow-2xl bg-gray-100">
+                                    <div className="w-full aspect-video relative rounded-lg overflow-hidden shadow-2xl bg-gray-100">
                                         <AnimatePresence mode="wait">
                                             {(() => {
                                                 const activeSlide = getActiveSlide();
+
                                                 if (!activeSlide) return null;
 
                                                 return (
@@ -512,14 +711,77 @@ export default function ClientDashboard() {
                                                                                     initial={{ opacity: 0, x: 0, y: 40 }}
                                                                                     animate={{ opacity: 1, x: 0, y: 0 }}
                                                                                     transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
+                                                                                    className="max-w-[85vw] md:max-w-none"
                                                                                 >
-                                                                                    <h3 className="text-2xl md:text-4xl font-bold text-white tracking-widest drop-shadow-md leading-relaxed">
+                                                                                    <h3 className="text-xl sm:text-2xl md:text-4xl font-bold text-white tracking-wider md:tracking-widest drop-shadow-md leading-relaxed break-words whitespace-pre-wrap">
                                                                                         {activeSlide.content}
                                                                                     </h3>
                                                                                 </motion.div>
                                                                             </div>
                                                                         </div>
                                                                     );
+                                                                case 'OFFER':
+                                                                    return (
+                                                                        <div className="absolute inset-0 w-full h-full relative group">
+                                                                            {/* Background Image */}
+                                                                            {activeSlide.imageUrl && (
+                                                                                <div className="absolute inset-0">
+                                                                                    <img
+                                                                                        src={activeSlide.imageUrl}
+                                                                                        alt="Offer Background"
+                                                                                        className="w-full h-full object-cover transition-transform duration-[3s] ease-out group-hover:scale-105"
+                                                                                    />
+                                                                                    {/* Dark Overlay for readability */}
+                                                                                    <div className="absolute inset-0 bg-black/40" />
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Content Center */}
+                                                                            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 sm:p-8 z-10 w-full overflow-hidden">
+                                                                                <motion.div
+                                                                                    initial={{ opacity: 0, y: 20 }}
+                                                                                    animate={{ opacity: 1, y: 0 }}
+                                                                                    transition={{ duration: 0.6, ease: "easeOut", delay: 0.2 }}
+                                                                                    className="w-full max-w-[95%] sm:max-w-[90%] mx-auto px-2"
+                                                                                >
+                                                                                    <h3 className="text-xl sm:text-2xl md:text-4xl font-bold text-white tracking-wider md:tracking-widest mb-2 sm:mb-4 drop-shadow-md break-words whitespace-pre-wrap w-full">
+                                                                                        {activeSlide.title || 'ご案内'}
+                                                                                    </h3>
+                                                                                </motion.div>
+
+                                                                                <motion.div
+                                                                                    initial={{ opacity: 0 }}
+                                                                                    animate={{ opacity: 1 }}
+                                                                                    transition={{ duration: 0.6, ease: "easeOut", delay: 0.4 }}
+                                                                                    className="w-full max-w-[95%] sm:max-w-lg mx-auto px-2"
+                                                                                >
+                                                                                    <p className="text-white/90 text-xs sm:text-sm md:text-base font-medium leading-relaxed mb-6 sm:mb-8 whitespace-pre-line drop-shadow-sm break-words w-full">
+                                                                                        {activeSlide.content}
+                                                                                    </p>
+                                                                                </motion.div>
+
+                                                                                {activeSlide.buttonText && activeSlide.linkUrl && (
+                                                                                    <motion.div
+                                                                                        initial={{ opacity: 0, scale: 0.9 }}
+                                                                                        animate={{ opacity: 1, scale: 1 }}
+                                                                                        transition={{ duration: 0.4, ease: "easeOut", delay: 0.6 }}
+                                                                                        className="px-2 w-full flex justify-center"
+                                                                                    >
+                                                                                        <a
+                                                                                            href={activeSlide.linkUrl}
+                                                                                            target="_blank"
+                                                                                            rel="noopener noreferrer"
+                                                                                            className="inline-block bg-white text-gray-900 px-6 sm:px-8 py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-bold tracking-widest hover:bg-gray-100 hover:scale-105 transition-all shadow-lg text-center max-w-full break-normal"
+                                                                                        >
+                                                                                            {activeSlide.buttonText}
+                                                                                        </a>
+                                                                                    </motion.div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                case 'POPULAR':
+                                                                    return <PopularPhotosSlide photos={topPhotos} />;
                                                                 default:
                                                                     return null;
                                                             }
@@ -530,20 +792,22 @@ export default function ClientDashboard() {
                                         </AnimatePresence>
                                     </div>
 
-                                    <div className="flex justify-center border-b border-gray-100 pb-6 mt-4">
-                                        <div className="inline-flex bg-gray-100/80 backdrop-blur-sm p-1.5 rounded-full relative shadow-inner">
+                                    <div className="flex justify-start md:justify-center overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] border-b border-gray-100 pb-6 mt-4 w-full">
+                                        <div className="inline-flex bg-gray-100/80 backdrop-blur-sm p-1 md:p-1.5 rounded-full relative shadow-inner min-w-max mx-auto md:mx-0">
                                             {slideshowSettings.map((slide) => {
                                                 const LABEL_MAP: Record<string, string> = {
                                                     'MOVIE': '動画',
                                                     'AFTER': '現像後',
-                                                    'DESCRIPTION': '説明'
+                                                    'DESCRIPTION': '説明',
+                                                    'OFFER': 'ご案内',
+                                                    'POPULAR': '人気の写真'
                                                 };
 
                                                 return (
                                                     <button
                                                         key={slide.id}
                                                         onClick={() => setActiveTabId(slide.id)}
-                                                        className={`relative px-6 py-2 rounded-full text-sm font-medium transition-colors duration-200 z-10 ${activeTabId === slide.id
+                                                        className={`relative px-4 sm:px-6 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-colors duration-200 z-10 ${activeTabId === slide.id
                                                             ? 'text-white'
                                                             : 'text-gray-500 hover:text-black'
                                                             }`}
@@ -572,31 +836,37 @@ export default function ClientDashboard() {
                         <section className="px-4 py-8 pb-4">
                             {downloadSections.length > 0 ? (
                                 <div className="max-w-lg mx-auto">
-                                    <div className="flex flex-col gap-4">
-                                        {downloadSections.map((section, idx) => (
-                                            <button
-                                                key={idx}
-                                                onClick={() => openDownloadModal(section)}
-                                                className="group relative flex items-center justify-between w-full p-6 bg-blue-600 text-white rounded-lg shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 decoration-0"
-                                            >
-                                                <div className="flex items-center gap-5 overflow-hidden">
-                                                    <div className="flex-shrink-0 bg-white/20 p-3 rounded-md group-hover:bg-white/30 transition-colors">
-                                                        <FolderArchive className="h-8 w-8 text-white" />
+                                    <div className="bg-gray-50/80 backdrop-blur-sm rounded-2xl p-6 border border-gray-100 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300">
+                                        <h3 className="text-blue-600 font-bold mb-4 flex items-center gap-2 text-sm md:text-base">
+                                            <span>一括ダウンロード</span>
+                                        </h3>
+                                        <div className="flex flex-col gap-4">
+                                            {downloadSections.map((section, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => openDownloadModal(section)}
+                                                    className="group relative flex items-center justify-between w-full p-4 bg-white border border-blue-100 text-gray-800 rounded-xl shadow-sm hover:shadow-md hover:border-blue-300 hover:-translate-y-0.5 transition-all duration-300 decoration-0"
+                                                >
+                                                    <div className="flex items-center gap-4 overflow-hidden">
+                                                        <div className="flex-shrink-0 bg-blue-50 p-2.5 rounded-lg group-hover:bg-blue-100 transition-colors">
+                                                            <FolderArchive className="h-6 w-6 text-blue-600" />
+                                                        </div>
+                                                        <div className="min-w-0 text-left">
+                                                            <p className="text-base font-bold truncate text-gray-900">
+                                                                {section.title}
+                                                            </p>
+                                                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 font-medium">{section.count}枚</span>
+                                                                <span>{section.size}</span>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <div className="min-w-0 text-left">
-                                                        <p className="text-lg font-bold truncate tracking-wide">
-                                                            {section.title} <span className="text-sm font-normal ml-1 opacity-90">(全{section.count}枚)</span>
-                                                        </p>
-                                                        <p className="text-sm font-medium text-blue-100 mt-0.5">
-                                                            {section.size}
-                                                        </p>
+                                                    <div className="flex-shrink-0 ml-4 text-gray-300 group-hover:text-blue-500 transition-colors">
+                                                        <Download className="h-5 w-5" />
                                                     </div>
-                                                </div>
-                                                <div className="flex-shrink-0 ml-4 bg-white/10 p-2 rounded-full group-hover:bg-white/20 transition-colors">
-                                                    <Download className="h-5 w-5 text-white" />
-                                                </div>
-                                            </button>
-                                        ))}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             ) : (
@@ -609,19 +879,11 @@ export default function ClientDashboard() {
                                 photos={photos}
                                 loading={loading}
                                 emptyMessage="写真はまだありません。"
-                                renderOverlay={(photo) => (
-                                    <a
-                                        href={photo.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="p-2 bg-white/90 rounded-full hover:bg-white text-gray-900 shadow-sm transition-colors"
-                                        download={photo.fileName}
-                                        title="Download"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <Download className="h-4 w-4" />
-                                    </a>
-                                )}
+                                enableMultiSelect={true}
+                                enableLikes={projectData?.isLikeEnabled !== false}
+                                likedPhotoIds={likedPhotoIds}
+                                onToggleLike={handleToggleLike}
+                                onDownloadLog={handleDownloadLog}
                             />
                         </section>
                     </main>
@@ -678,8 +940,9 @@ export default function ClientDashboard() {
                             </div>
                         </div>
                     )}
-                </motion.div>
-            )}
+                </motion.div >
+            )
+            }
         </>
     );
 }

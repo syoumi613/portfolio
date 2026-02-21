@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { db, storage } from '@/lib/firebase';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Plus, Trash2, Image as ImageIcon, Video, FileText, Loader2, Link, ArrowUp, ArrowDown, Lock } from 'lucide-react';
+import { Plus, Trash2, Image as ImageIcon, Video, FileText, Loader2, Link, ArrowUp, ArrowDown, Lock, TrendingUp } from 'lucide-react';
 
 export interface SlideshowSlide {
     id: string;
-    type: 'MOVIE' | 'AFTER' | 'DESCRIPTION';
+    type: 'MOVIE' | 'AFTER' | 'DESCRIPTION' | 'OFFER' | 'POPULAR';
     title: string;
     content: string;
     storagePath?: string;
@@ -17,6 +17,8 @@ export interface SlideshowSlide {
     beforeStoragePath?: string;
     afterStoragePath?: string;
     imageUrl?: string;
+    buttonText?: string;
+    linkUrl?: string;
 }
 
 interface SlideshowManagerProps {
@@ -28,7 +30,9 @@ interface SlideshowManagerProps {
 const TYPE_LABELS: Record<string, string> = {
     'MOVIE': '動画',
     'AFTER': '現像後',
-    'DESCRIPTION': '説明'
+    'DESCRIPTION': '説明',
+    'OFFER': 'ご案内',
+    'POPULAR': '人気の写真'
 };
 
 export default function SlideshowManager({ projectId, slides, onUpdate }: SlideshowManagerProps) {
@@ -36,8 +40,11 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
     const [uploading, setUploading] = useState(false);
 
     // New Slide Form State
-    const [newType, setNewType] = useState<'MOVIE' | 'AFTER' | 'DESCRIPTION'>('MOVIE');
+    const [newType, setNewType] = useState<'MOVIE' | 'AFTER' | 'DESCRIPTION' | 'OFFER' | 'POPULAR'>('MOVIE');
     const [newContent, setNewContent] = useState('');
+    const [offerTitle, setOfferTitle] = useState('');
+    const [buttonText, setButtonText] = useState('');
+    const [linkUrl, setLinkUrl] = useState('');
 
     // For MOVIE type
     const [movieFile, setMovieFile] = useState<File | null>(null);
@@ -47,6 +54,8 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
     const [afterFile, setAfterFile] = useState<File | null>(null);
     // For DESCRIPTION type
     const [descBgFile, setDescBgFile] = useState<File | null>(null);
+    // For OFFER type
+    const [offerBgFile, setOfferBgFile] = useState<File | null>(null);
 
     // Reorder Function
     const handleMoveSlide = async (index: number, direction: 'up' | 'down') => {
@@ -133,6 +142,20 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                 newSlide.afterStoragePath = afterSnapshot.ref.fullPath;
 
                 newSlide.content = afterUrl;
+            } else if (newType === 'OFFER') {
+                if (offerBgFile) {
+                    const storageRef = ref(storage, `projects/${projectId}/slideshow/${Date.now()}_offer_${offerBgFile.name}`);
+                    const snapshot = await uploadBytes(storageRef, offerBgFile);
+                    const downloadUrl = await getDownloadURL(snapshot.ref);
+                    newSlide.imageUrl = downloadUrl;
+                    newSlide.storagePath = snapshot.ref.fullPath;
+                }
+                newSlide.title = offerTitle;
+                newSlide.content = newContent; // Message
+                newSlide.buttonText = buttonText;
+                newSlide.linkUrl = linkUrl;
+            } else if (newType === 'POPULAR') {
+                // No additional logic needed for POPULAR type
             }
 
             // AUTO SORT Logic:
@@ -156,8 +179,14 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
             setNewContent('');
             setBeforeFile(null);
             setAfterFile(null);
+            setBeforeFile(null);
+            setAfterFile(null);
             setDescBgFile(null);
+            setOfferBgFile(null);
             setMovieFile(null);
+            setOfferTitle('');
+            setButtonText('');
+            setLinkUrl('');
             alert('スライドを追加しました');
 
         } catch (error) {
@@ -236,17 +265,21 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                 </div>
 
                                 <div className={`p-2 rounded-lg flex-shrink-0 ${slide.type === 'MOVIE' ? 'bg-red-100 text-red-600' :
-                                        slide.type === 'AFTER' ? 'bg-blue-100 text-blue-600' :
+                                    slide.type === 'AFTER' ? 'bg-blue-100 text-blue-600' :
+                                        slide.type === 'POPULAR' ? 'bg-amber-100 text-amber-600' :
                                             'bg-green-100 text-green-600'
                                     }`}>
                                     {slide.type === 'MOVIE' && <Video className="h-5 w-5" />}
                                     {slide.type === 'AFTER' && <ImageIcon className="h-5 w-5" />}
                                     {slide.type === 'DESCRIPTION' && <FileText className="h-5 w-5" />}
+                                    {slide.type === 'OFFER' && <Link className="h-5 w-5" />}
+                                    {slide.type === 'POPULAR' && <TrendingUp className="h-5 w-5" />}
                                 </div>
                                 <div className="min-w-0">
                                     <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                                         {TYPE_LABELS[slide.type] || slide.type}
                                         {slide.type === 'MOVIE' && <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded border border-red-100">先頭固定</span>}
+                                        {slide.type === 'OFFER' && <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded border border-blue-100">{slide.title}</span>}
                                     </p>
                                     <div className="text-sm text-gray-500 truncate mt-0.5 flex items-center gap-2">
                                         {slide.type === 'MOVIE' && (
@@ -261,6 +294,8 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                         )}
                                         {slide.type === 'DESCRIPTION' && slide.content}
                                         {slide.type === 'AFTER' && '画像2枚セット'}
+                                        {slide.type === 'OFFER' && `${slide.content.substring(0, 20)}...`}
+                                        {slide.type === 'POPULAR' && '上位4枚の写真（自動生成）'}
                                     </div>
                                 </div>
                             </div>
@@ -301,14 +336,14 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                         {/* Type Selector */}
                         <div>
                             <label className="block text-xs font-semibold text-gray-700 mb-2">種類を選択</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {(['MOVIE', 'AFTER', 'DESCRIPTION'] as const).map((type) => (
+                            <div className="grid grid-cols-5 gap-2">
+                                {(['MOVIE', 'AFTER', 'DESCRIPTION', 'OFFER', 'POPULAR'] as const).map((type) => (
                                     <button
                                         key={type}
                                         onClick={() => setNewType(type)}
                                         className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all ${newType === type
-                                                ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                                             }`}
                                     >
                                         {TYPE_LABELS[type]}
@@ -323,6 +358,8 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                 {newType === 'MOVIE' && '動画ファイル (mp4等) または URL'}
                                 {newType === 'AFTER' && 'Before/After画像のアップロード'}
                                 {newType === 'DESCRIPTION' && 'メッセージ設定'}
+                                {newType === 'OFFER' && 'ご案内設定'}
+                                {newType === 'POPULAR' && '設定情報'}
                             </label>
 
                             {newType === 'MOVIE' && (
@@ -397,6 +434,57 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                     />
                                 </div>
                             )}
+
+                            {newType === 'OFFER' && (
+                                <div className="space-y-3">
+                                    <div className="border border-gray-300 rounded-lg p-3">
+                                        <p className="text-xs font-bold text-gray-600 mb-2">背景画像 (魅力を伝える写真)</p>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => setOfferBgFile(e.target.files?.[0] || null)}
+                                            className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
+                                        />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={offerTitle}
+                                        onChange={(e) => setOfferTitle(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                                        placeholder="タイトル (例: アーティスト写真撮影)"
+                                    />
+                                    <textarea
+                                        value={newContent}
+                                        onChange={(e) => setNewContent(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-h-[80px]"
+                                        placeholder="メッセージ (例: 次回のライブ撮影をご提案します...)"
+                                    />
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <input
+                                            type="text"
+                                            value={buttonText}
+                                            onChange={(e) => setButtonText(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                                            placeholder="ボタン名 (例: 詳細を見る)"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={linkUrl}
+                                            onChange={(e) => setLinkUrl(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                                            placeholder="URL (例: /contact)"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {newType === 'POPULAR' && (
+                                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                    <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                                        「人気の写真」スライドは、ギャラリー内でいいね数が付いた写真上位4枚を<br />自動的にコラージュ表示する動的なスライドです。<br />追加の設定項目はありません。そのまま「追加する」を押してください。
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Submit Button */}
@@ -406,12 +494,14 @@ export default function SlideshowManager({ projectId, slides, onUpdate }: Slides
                                 uploading ||
                                 (newType === 'MOVIE' && !newContent && !movieFile) ||
                                 (newType === 'DESCRIPTION' && !newContent) ||
-                                (newType === 'AFTER' && (!beforeFile || !afterFile))
+                                (newType === 'AFTER' && (!beforeFile || !afterFile)) ||
+                                (newType === 'OFFER' && (!offerTitle || !newContent || !buttonText || !linkUrl))
                             }
                             className={`w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center justify-center gap-2 ${(uploading ||
-                                    (newType === 'MOVIE' && !newContent && !movieFile) ||
-                                    (newType === 'DESCRIPTION' && (!newContent || !descBgFile)) ||
-                                    (newType === 'AFTER' && (!beforeFile || !afterFile))) ? 'opacity-50 cursor-not-allowed' : ''
+                                (newType === 'MOVIE' && !newContent && !movieFile) ||
+                                (newType === 'DESCRIPTION' && (!newContent || !descBgFile)) ||
+                                (newType === 'AFTER' && (!beforeFile || !afterFile)) ||
+                                (newType === 'OFFER' && (!offerTitle || !newContent || !buttonText || !linkUrl))) ? 'opacity-50 cursor-not-allowed' : ''
                                 }`}
                         >
                             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : '追加する'}

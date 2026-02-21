@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Image as ImageIcon, LogOut, Menu, X, Settings } from 'lucide-react';
+import { LayoutDashboard, Image as ImageIcon, LogOut, Menu, X, BarChart3, Settings } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 
@@ -56,6 +56,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     const handleLogout = async () => {
         await signOut(auth);
+        localStorage.removeItem('isAdmin');
         router.push('/admin/');
     };
 
@@ -63,7 +64,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { name: 'プロジェクト管理', href: '/admin/dashboard/', icon: LayoutDashboard },
         { name: 'ポートフォリオ管理', href: '/admin/portfolio/', icon: ImageIcon },
         { name: 'スライドショー管理', href: '/admin/slides/', icon: ImageIcon },
-        // { name: '設定', href: '/admin/settings', icon: Settings }, // Future
+        { name: 'アクセス解析', href: '/admin/analytics/', icon: BarChart3 },
     ];
 
     return (

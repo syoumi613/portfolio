@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { Upload, X, Check, Image as ImageIcon, Trash2, ArrowLeft, Loader2, FolderArchive, FileArchive, Plus, FileText, MonitorPlay } from 'lucide-react';
+import { Upload, X, Check, Image as ImageIcon, Trash2, ArrowLeft, Loader2, FolderArchive, FileArchive, Plus, FileText, MonitorPlay, Heart } from 'lucide-react';
 import Link from 'next/link';
 import Gallery from '@/components/Gallery';
 import SlideshowManager, { SlideshowSlide } from './SlideshowManager';
@@ -485,6 +485,24 @@ function ProjectDetailsContent() {
         }
     };
 
+    const handleToggleLikeEnabled = async () => {
+        if (!projectId || !project) return;
+
+        // Default to true if undefined
+        const currentStatus = project.isLikeEnabled !== false;
+        const newStatus = !currentStatus;
+
+        try {
+            await updateDoc(doc(db, 'projects', projectId), {
+                isLikeEnabled: newStatus
+            });
+            setProject((prev: any) => ({ ...prev, isLikeEnabled: newStatus }));
+        } catch (error) {
+            console.error("Failed to update like status", error);
+            alert("設定の更新に失敗しました");
+        }
+    };
+
     if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center">読み込み中...</div>;
     if (!projectId) return <div className="min-h-screen bg-gray-50 flex items-center justify-center">URLパラメータエラー: プロジェクトIDが指定されていません</div>;
     if (!project && !loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center">プロジェクトが見つかりません</div>;
@@ -521,6 +539,30 @@ function ProjectDetailsContent() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Left Column: Upload & Downloads & Slideshow */}
                     <div className="lg:col-span-1 space-y-6">
+
+                        {/* Project Settings */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <Heart className="h-5 w-5 text-pink-500" />
+                                プロジェクト機能設定
+                            </h2>
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
+                                <div>
+                                    <p className="text-sm font-bold text-gray-900">いいね機能を有効にする</p>
+                                    <p className="text-xs text-gray-500 mt-1">納品ページの各画像のハートボタンと<br />人気の写真スライドを表示します。</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleToggleLikeEnabled}
+                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${project.isLikeEnabled !== false ? 'bg-blue-600' : 'bg-gray-200'}`}
+                                >
+                                    <span
+                                        aria-hidden="true"
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${project.isLikeEnabled !== false ? 'translate-x-5' : 'translate-x-0'}`}
+                                    />
+                                </button>
+                            </div>
+                        </div>
 
                         {/* 0. Slideshow Settings */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

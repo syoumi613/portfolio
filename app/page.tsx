@@ -5,9 +5,9 @@ import Image from "next/image";
 import { ArrowRight } from "lucide-react";
 import Gallery from '@/components/Gallery';
 import LoginModal from '@/components/LoginModal';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, doc, setDoc, increment, serverTimestamp, addDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 import HeroSlider from '@/components/HeroSlider';
 
@@ -28,9 +28,42 @@ export default function Home() {
 
   ];
 
+  const isTracked = useRef(false);
+
   useEffect(() => {
     fetchPhotos();
+
+    // Analytics Tracking (Run once per mount)
+    if (!isTracked.current) {
+      isTracked.current = true;
+      trackMainPageVisit();
+    }
   }, []);
+
+  const trackMainPageVisit = async () => {
+    // Exclude Admin Tracking
+    if (typeof window !== 'undefined' && localStorage.getItem('isAdmin') === 'true') {
+      console.log('Skipping main page tracking for Admin');
+      return;
+    }
+
+    try {
+      // 1. Increment Total Page Views
+      const mainStatsRef = doc(db, 'siteStats', 'main');
+      await setDoc(mainStatsRef, {
+        pageViews: increment(1)
+      }, { merge: true });
+
+      // 2. Add Timeline Log
+      await addDoc(collection(db, 'siteStats', 'main', 'logs'), {
+        type: 'view',
+        timestamp: serverTimestamp(),
+      });
+      console.log('Tracked main page visit.');
+    } catch (error) {
+      console.error("Failed to track main page visit:", error);
+    }
+  };
 
   const fetchPhotos = async () => {
     try {
@@ -142,8 +175,7 @@ export default function Home() {
 
       {/* Hero button needs this modal */}
       <LoginModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-      {/* Hero button needs this modal */}
-      <LoginModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+
 
 
       <div className="flex-1 flex flex-col">

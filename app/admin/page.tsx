@@ -23,6 +23,7 @@ export default function AdminLogin() {
             const email = `admin_${adminCode}@portfolio.local`;
             const password = `password-${adminCode}`;
             await signInWithEmailAndPassword(auth, email, password);
+            localStorage.setItem('isAdmin', 'true');
             router.push('/admin/dashboard/');
         } catch (err: any) {
             console.error(err);
@@ -34,6 +35,7 @@ export default function AdminLogin() {
                     const password = `password-${adminCode}`;
                     await createUserWithEmailAndPassword(auth, email, password);
                     // Retry login or just redirect (createUser automatically logs in)
+                    localStorage.setItem('isAdmin', 'true');
                     router.push('/admin/dashboard/');
                     return;
                 } catch (createErr) {
