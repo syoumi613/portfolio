@@ -274,7 +274,7 @@ export default function PortfolioManagement() {
 
                 {/* Category Tabs */}
                 <div className="flex flex-wrap gap-2 mb-8 bg-gray-100/50 p-1.5 rounded-full w-fit">
-                    {['portrait', 'architecture', 'event', 'food'].map((cat) => (
+                    {['portrait', 'architecture', 'live', 'event'].map((cat) => (
                         <button
                             key={cat}
                             onClick={() => setCategory(cat)}
@@ -291,8 +291,8 @@ export default function PortfolioManagement() {
                                 />
                             )}
                             <span className="relative z-10">
-                                {cat === 'food' ? '料理' :
-                                    cat === 'event' ? 'イベント' :
+                                {cat === 'event' ? 'イベント' :
+                                    cat === 'live' ? 'ライブ' :
                                         cat === 'architecture' ? '建築' : 'ポートレート'}
                             </span>
                         </button>
@@ -305,8 +305,8 @@ export default function PortfolioManagement() {
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-8">
                             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                                 <Upload className="h-5 w-5 text-blue-600" />
-                                {category === 'food' ? '料理' :
-                                    category === 'event' ? 'イベント' :
+                                {category === 'event' ? 'イベント' :
+                                    category === 'live' ? 'ライブ' :
                                         category === 'architecture' ? '建築' : 'ポートレート'}
                                 に写真を追加
                             </h2>

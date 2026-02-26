@@ -18,23 +18,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const isLoginPage = pathname === '/admin' || pathname === '/admin/';
 
     useEffect(() => {
-        // If on login page, no need to check auth (or we could redirect to dashboard if already logged in, but let's keep it simple)
-        if (isLoginPage) {
-            setIsLoading(false);
-            return;
-        }
-
         const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                setIsAuthenticated(true);
-            } else {
-                router.push('/admin/');
-            }
+            setIsAuthenticated(!!user);
             setIsLoading(false);
         });
 
         return () => unsubscribe();
-    }, [pathname, isLoginPage, router]);
+    }, []);
+
+    useEffect(() => {
+        if (!isLoading && !isAuthenticated && !isLoginPage) {
+            router.push('/admin');
+        }
+    }, [isLoading, isAuthenticated, isLoginPage, router]);
 
     // If on the login page, render children directly (Login Form)
     if (isLoginPage) {

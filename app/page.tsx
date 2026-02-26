@@ -23,8 +23,8 @@ export default function Home() {
   const categories = [
     { id: 'portrait', label: 'ポートレート' },
     { id: 'architecture', label: '建築' },
+    { id: 'live', label: 'ライブ' },
     { id: 'event', label: 'イベント' },
-    { id: 'food', label: '料理' },
 
   ];
 
@@ -187,7 +187,7 @@ export default function Home() {
           className="w-full px-6 pb-8"
         >
           <div className="mt-28 md:mt-36 w-full px-4">
-            <div className="w-full h-[300px] md:h-[500px]">
+            <div className="w-full aspect-[21/9] md:max-w-7xl mx-auto">
               <HeroSlider />
             </div>
 

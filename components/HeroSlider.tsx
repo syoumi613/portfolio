@@ -108,7 +108,7 @@ export default function HeroSlider() {
                         src={currentSlide.url}
                         alt={`Slide ${currentIndex + 1}`}
                         fill
-                        className="object-cover"
+                        className="object-cover object-center"
                         priority={currentIndex === 0}
                         sizes="(max-width: 768px) 100vw, 80vw"
                     />
@@ -118,7 +118,7 @@ export default function HeroSlider() {
             </AnimatePresence>
 
             {/* A. Left Text Overlay (Dynamic) */}
-            <div className="absolute left-[8%] md:left-[10%] top-[60%] -translate-y-1/2 z-20 pointer-events-none">
+            <div className="absolute left-[8%] md:left-[10%] top-[50%] -translate-y-1/2 z-20 pointer-events-none">
                 <AnimatePresence mode="wait">
                     <motion.div
                         key={`text-${currentIndex}`}
@@ -156,7 +156,7 @@ export default function HeroSlider() {
 
             {/* Progress Indicators */}
             {currentSlides.length > 1 && (
-                <div className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-4 z-20">
+                <div className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2 md:gap-4 z-20">
                     {currentSlides.map((_, idx) => (
                         <motion.div
                             key={idx}
